@@ -51,22 +51,4 @@ jobs:
                               "value": "${{ env.DOCKER_USER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
                           }
                       ]' \
-                      "${{ env.K8S_API_URL }}" --insecure > /dev/null
-            # - name: Patch the deployment
-            #   uses: indiesdev/curl@v1.1
-            #   with:
-            #       url: "https://kubernetes.default:443/apis/apps/v1/namespaces/default/deployments/${{ env.K8S_DEPLOYMENT }}?fieldManager=kubectl-patch"
-            #       method: PATCH
-            #       bearer-token: ${{ env.UPDATER_TOKEN }}
-            #       headers: |
-            #           {
-            #             Content-Type: application/json-patch+json
-            #           }
-            #       data: |
-            #           [
-            #             {
-            #               "op": "replace",
-            #               "path": "/spec/template/spec/containers/0/image",
-            #               "value": "${{ env.DOCKER_USER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
-            #             }
-            #           ]
+                      "${{ env.K8S_API_URL }}" --insecure --fail > /dev/null
