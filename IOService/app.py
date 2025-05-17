@@ -10,10 +10,20 @@ from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 
 DB_HOST = os.getenv("DB_HOST")
+if not DB_HOST:
+    raise ValueError("DB_HOST environment variable is not set.")
 DB_PORT = os.getenv("DB_PORT")
+if not DB_PORT:
+    raise ValueError("DB_PORT environment variable is not set.")
 DB_USER = os.getenv("DB_USER")
+if not DB_USER:
+    raise ValueError("DB_USER environment variable is not set.")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
+if not DB_PASSWORD:
+    raise ValueError("DB_PASSWORD environment variable is not set.")
 DB_NAME = os.getenv("DB_NAME")
+if not DB_NAME:
+    raise ValueError("DB_NAME environment variable is not set.")
 
 app = Flask(__name__)
 
@@ -69,19 +79,19 @@ def handle_exception(e):
     return response
 
 
-# --- Index Route ---
-@app.route("/", methods=["GET"])
-def index():
-    """
-    Index page
-    """
+# --- Health Check ---
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint."""
     try:
         conn = get_db_connection()
         conn.close()
-        db_status = "Connected"
+        return jsonify({"status": "healthy"}), 200
     except ConnectionError:
-        db_status = "Connection Failed"
-    return render_template("index.html", db_status=db_status)
+        return jsonify({"status": "unhealthy"}), 503
+    except psycopg2.Error as e:
+        app.logger.error("Health check database error: %s", e)
+        return jsonify({"status": "unhealthy", "error": str(e)}), 500
 
 
 # --- Users ---
@@ -173,8 +183,6 @@ def update_user(uid):
     set_parts = []
     values = []
     valid_fields = [
-        "email",
-        "passwd",
         "is_publisher",
         "is_admin",
     ]
@@ -227,6 +235,72 @@ def delete_user(uid):
     finally:
         cur.close()
         conn.close()
+
+
+@app.route("/users/validate", methods=["POST"])
+def validate_user():
+    """
+    Validates user credentials (email and password).
+    """
+    data = request.get_json()
+    if not data:
+        app.logger.error("Validation attempt with no data.")
+        return jsonify({"error": "Invalid input"}), 400
+
+    email = data.get("email")
+    passwd = data.get("passwd")
+
+    if not email or not passwd:
+        app.logger.info("Validation attempt with missing email or password.")
+        return jsonify({"error": "Email and password are required"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        app.logger.debug(f"Attempting to validate user with email: {email}")
+        cur.execute(
+            "SELECT uid, email, passwd, is_publisher, is_admin FROM Users WHERE email = %s;",
+            (email,),
+        )
+        user = cur.fetchone()
+
+        if user:
+            if user["passwd"] == passwd:
+                app.logger.info(f"User {email} validated successfully.")
+                return (
+                    jsonify(
+                        {
+                            "uid": user["uid"],
+                            "email": user["email"],
+                            "is_publisher": user["is_publisher"],
+                            "is_admin": user["is_admin"],
+                        }
+                    ),
+                    200,
+                )
+            else:
+                app.logger.info(f"Invalid password for user {email}.")
+                return jsonify({"error": "Invalid credentials"}), 401
+        else:
+            app.logger.info(f"No user found with email: {email}")
+            return jsonify({"error": "Invalid credentials"}), 401
+
+    except psycopg2.Error as e:
+        app.logger.error(f"Database error during user validation for {email}: {e}")
+        if conn:
+            conn.rollback()
+        return (
+            jsonify({"error": "Database error during validation", "detail": str(e)}),
+            500,
+        )
+    finally:
+        if conn:
+            if cur:
+                cur.close()
+            conn.close()
+            app.logger.debug(f"Database connection closed for {email} validation.")
 
 
 # --- Wallets ---
